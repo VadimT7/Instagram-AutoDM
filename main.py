@@ -1,6 +1,8 @@
 """
 Main Instagram DM Automation System
 """
+import utils.transport
+import utils.session
 import sys
 import time
 import random
