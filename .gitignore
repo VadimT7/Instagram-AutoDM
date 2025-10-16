@@ -43,7 +43,6 @@ logs/
 *.jpg
 
 # IDE
-.vscode/
 .idea/
 *.swp
 *.swo
@@ -57,3 +56,5 @@ Thumbs.db
 test_*.py
 debug_*.py
 
+config.bat
+node_modules
