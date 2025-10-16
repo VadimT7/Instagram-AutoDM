@@ -68,6 +68,7 @@ class ModernInstagramAutomation:
         self.total_failed = 0
         self.session_sent = 0
         self.start_time = None
+        self.stat_labels = {}  # Initialize stat labels dictionary
         
         # Create UI
         self.create_ui()
@@ -263,9 +264,6 @@ class ModernInstagramAutomation:
         self.create_stat_card(stats_container, "Failed", "0", COLORS['danger'], 1)
         self.create_stat_card(stats_container, "Success Rate", "0%", COLORS['accent'], 2)
         self.create_stat_card(stats_container, "Avg Speed", "0/hr", COLORS['warning'], 3)
-        
-        # Store stat labels for updating
-        self.stat_labels = {}
         
         # Activity chart placeholder
         chart_frame = tk.Frame(self.dashboard_frame, bg=COLORS['card_bg'], height=300)
