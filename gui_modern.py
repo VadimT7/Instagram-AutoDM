@@ -903,7 +903,7 @@ Professional automation solution
             self.automation_instance.print_status = log_handler
             
             # Run automation
-            self.automation_instance.run()
+            self.automation_instance.run_automation()
             
         except Exception as e:
             self.log_message(f"Error: {str(e)}", "error")
