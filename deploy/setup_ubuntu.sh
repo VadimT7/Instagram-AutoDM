@@ -33,15 +33,15 @@ echo "[4/7] Installing system dependencies..."
 sudo apt-get install -y \
     xvfb \
     fonts-liberation \
-    libasound2 \
+    libasound2t64 \
     libatk-bridge2.0-0 \
-    libatk1.0-0 \
-    libatspi2.0-0 \
-    libcups2 \
+    libatk1.0-0t64 \
+    libatspi2.0-0t64 \
+    libcups2t64 \
     libdbus-1-3 \
     libdrm2 \
     libgbm1 \
-    libgtk-3-0 \
+    libgtk-3-0t64 \
     libnspr4 \
     libnss3 \
     libwayland-client0 \

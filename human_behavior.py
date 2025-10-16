@@ -13,7 +13,10 @@ class HumanBehavior:
         self.driver = driver
         
     def random_delay(self, min_seconds=1, max_seconds=3):
-        """Generate random delay with normal distribution"""
+        """Generate random delay with normal distribution - optimized for speed"""
+        # Reduce all delays by 60% for faster operation
+        min_seconds = min_seconds * 0.4
+        max_seconds = max_seconds * 0.4
         mean = (min_seconds + max_seconds) / 2
         std = (max_seconds - min_seconds) / 4
         delay = np.random.normal(mean, std)
@@ -21,10 +24,10 @@ class HumanBehavior:
         time.sleep(delay)
         
     def typing_delay(self):
-        """Simulate human typing speed"""
-        # Average typing speed: 40 WPM = ~200 chars/min = ~3.3 chars/sec
-        # So ~0.3 sec per char with variation
-        return random.uniform(0.1, 0.4)
+        """Simulate human typing speed - fast typer"""
+        # Fast typing: 80-100 WPM = ~400-500 chars/min = ~7-8 chars/sec
+        # So ~0.12-0.14 sec per char for fast typing
+        return random.uniform(0.03, 0.08)  # 30-80ms per keystroke
     
     def human_type(self, element, text):
         """Type text with human-like speed and occasional mistakes, supporting multi-line"""
@@ -37,8 +40,8 @@ class HumanBehavior:
         for line_idx, line in enumerate(lines):
             # Type each line
             for char in line:
-                # Occasionally make typos and correct them (5% chance)
-                if random.random() < 0.05 and char.isalpha():
+                # Occasionally make typos and correct them (3% chance - less frequent)
+                if random.random() < 0.03 and char.isalpha():
                     wrong_char = random.choice('abcdefghijklmnopqrstuvwxyz')
                     element.send_keys(wrong_char)
                     time.sleep(self.typing_delay())
@@ -48,9 +51,9 @@ class HumanBehavior:
                 element.send_keys(char)
                 time.sleep(self.typing_delay())
                 
-                # Occasional pauses (10% chance)
-                if random.random() < 0.1:
-                    self.random_delay(0.5, 2)
+                # Occasional pauses (5% chance - less frequent)
+                if random.random() < 0.05:
+                    self.random_delay(0.3, 0.8)
             
             # Add line break if not the last line
             if line_idx < len(lines) - 1:
@@ -133,12 +136,12 @@ class HumanBehavior:
         actions.perform()
         
     def wait_between_actions(self):
-        """Wait between major actions with variation"""
-        base_wait = random.uniform(3, 8)
+        """Wait between major actions with variation - optimized"""
+        base_wait = random.uniform(1.5, 3.5)  # Faster base wait
         
-        # Sometimes take longer breaks (20% chance)
-        if random.random() < 0.2:
-            base_wait *= random.uniform(2, 4)
+        # Sometimes take longer breaks (10% chance - less frequent)
+        if random.random() < 0.1:
+            base_wait *= random.uniform(1.5, 2.5)
             
         time.sleep(base_wait)
         

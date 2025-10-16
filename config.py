@@ -23,17 +23,17 @@ So, I created a live website w/ your cars for you. I can send you the link and, 
 
 Reply "yes" to this message if you want to see your new luxurious website, tailored just to your rental company."""
     
-    # Timing settings (in seconds)
-    MIN_DELAY_BETWEEN_MESSAGES = 30  # Minimum delay between messages
-    MAX_DELAY_BETWEEN_MESSAGES = 120  # Maximum delay between messages
+    # Timing settings (in seconds) - optimized for speed
+    MIN_DELAY_BETWEEN_MESSAGES = 15  # Minimum delay between messages (faster)
+    MAX_DELAY_BETWEEN_MESSAGES = 45  # Maximum delay between messages (faster)
     
-    # Session settings
-    MESSAGES_PER_SESSION = 10  # Max messages to send per session
-    SESSION_BREAK_MIN = 900  # Minimum break between sessions (15 minutes)
-    SESSION_BREAK_MAX = 1800  # Maximum break between sessions (30 minutes)
+    # Session settings - increased throughput
+    MESSAGES_PER_SESSION = 20  # Max messages to send per session (doubled)
+    SESSION_BREAK_MIN = 300  # Minimum break between sessions (5 minutes)
+    SESSION_BREAK_MAX = 600  # Maximum break between sessions (10 minutes)
     
-    # Daily limits (to avoid detection)
-    DAILY_MESSAGE_LIMIT = 50
+    # Daily limits (to avoid detection) - increased for production
+    DAILY_MESSAGE_LIMIT = 100  # Increased daily limit
     
     # Browser settings
     HEADLESS_MODE = True  # Set to True to run browser in background (default for server deployment)
