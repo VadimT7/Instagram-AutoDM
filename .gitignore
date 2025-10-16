@@ -28,10 +28,16 @@ session_data/
 cookies/
 *.pkl
 
+# Database
+automation_history.db
+automation_history.db.backup_*
+*.db-journal
+
 # CSV outputs (keep template)
 *_report.csv
 successful_sends_*.csv
 unsuccessful_sends_*.csv
+failure_report*.csv
 processed_profiles.json
 
 # Logs

@@ -33,14 +33,14 @@ Reply "yes" to this message if you want to see your new luxurious website, tailo
     SESSION_BREAK_MAX = 600  # Maximum break between sessions (10 minutes)
     
     # Daily limits (to avoid detection) - increased for production
-    DAILY_MESSAGE_LIMIT = 100  # Increased daily limit
+    DAILY_MESSAGE_LIMIT = 200  # Increased daily limit
     
     # Browser settings
-    HEADLESS_MODE = True  # Set to True to run browser in background (default for server deployment)
+    HEADLESS_MODE = False  # Set to True to run browser in background (default for server deployment)
     
     # Retry settings
-    MAX_RETRIES = 3
-    RETRY_DELAY = 60  # Delay before retrying failed profile
+    MAX_RETRIES = 2  # Total attempts = 2 (1 initial + 1 retry)
+    RETRY_DELAY = 30  # Delay before retrying failed profile (seconds)
     
     # Anti-detection settings
     ENABLE_RANDOM_ACTIONS = True  # Enable random human-like actions

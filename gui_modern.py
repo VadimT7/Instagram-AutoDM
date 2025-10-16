@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import Config
 from csv_processor import CSVProcessor
+from database import AutomationDatabase
 import time
 
 # Modern color scheme
@@ -56,12 +57,22 @@ class ModernInstagramAutomation:
         # Configure root window
         self.root.configure(bg=COLORS['bg_dark'])
         
+        # Start in fullscreen
+        self.root.state('zoomed')  # Windows maximized
+        try:
+            self.root.attributes('-zoomed', True)  # Linux/Mac fullscreen
+        except:
+            pass
+        
         # Variables
         self.is_running = False
         self.automation_thread = None
         self.log_queue = queue.Queue()
         self.stats_queue = queue.Queue()
         self.automation_instance = None
+        
+        # Database
+        self.db = AutomationDatabase()
         
         # Statistics
         self.total_sent = 0
@@ -72,6 +83,9 @@ class ModernInstagramAutomation:
         
         # Create UI
         self.create_ui()
+        
+        # Load historical statistics
+        self.load_historical_stats()
         
         # Start queue monitoring
         self.process_queues()
@@ -135,6 +149,8 @@ class ModernInstagramAutomation:
         # Navigation buttons
         nav_items = [
             ("🏠 Dashboard", self.show_dashboard),
+            ("🔄 Flow Manager", self.show_flow_manager),
+            ("👥 Accounts", self.show_accounts),
             ("⚙️ Settings", self.show_settings),
             ("📊 Analytics", self.show_analytics),
             ("📝 Logs", self.show_logs),
@@ -194,7 +210,21 @@ class ModernInstagramAutomation:
             activebackground=COLORS['bg_medium'],
             command=self.export_results
         )
-        export_btn.pack(fill=tk.X, padx=20, pady=(0, 20))
+        export_btn.pack(fill=tk.X, padx=20, pady=(0, 10))
+        
+        # Failure Report button
+        failure_report_btn = tk.Button(
+            sidebar,
+            text="📊 Failure Analysis",
+            font=('Segoe UI', 11),
+            bg=COLORS['bg_light'],
+            fg=COLORS['text_primary'],
+            bd=0,
+            pady=10,
+            activebackground=COLORS['bg_medium'],
+            command=self.export_failure_report
+        )
+        failure_report_btn.pack(fill=tk.X, padx=20, pady=(0, 20))
         
     def create_header(self, parent):
         """Create top header with status"""
@@ -333,6 +363,14 @@ class ModernInstagramAutomation:
         self.settings_frame = tk.Frame(self.tab_container, bg=COLORS['bg_medium'])
         self.create_settings_tab(self.settings_frame)
         
+        # Flow Manager tab
+        self.flow_frame = tk.Frame(self.tab_container, bg=COLORS['bg_medium'])
+        self.create_flow_manager_tab(self.flow_frame)
+        
+        # Accounts tab
+        self.accounts_frame = tk.Frame(self.tab_container, bg=COLORS['bg_medium'])
+        self.create_accounts_tab(self.accounts_frame)
+        
         # Analytics tab
         self.analytics_frame = tk.Frame(self.tab_container, bg=COLORS['bg_medium'])
         self.create_analytics_tab(self.analytics_frame)
@@ -349,6 +387,494 @@ class ModernInstagramAutomation:
         self.about_frame = tk.Frame(self.tab_container, bg=COLORS['bg_medium'])
         self.create_about_tab(self.about_frame)
         
+    def create_flow_manager_tab(self, parent):
+        """Create flow management interface"""
+        from message_templates import MessageTemplates
+        
+        # Title
+        title = tk.Label(
+            parent,
+            text="Flow Manager",
+            font=('Segoe UI', 24, 'bold'),
+            bg=COLORS['bg_medium'],
+            fg=COLORS['text_primary']
+        )
+        title.pack(anchor='w', padx=20, pady=20)
+        
+        # Initialize templates if needed
+        MessageTemplates.initialize_templates(self.db)
+        
+        # Main container with scrollbar
+        main_container = tk.Frame(parent, bg=COLORS['bg_medium'])
+        main_container.pack(fill=tk.BOTH, expand=True, padx=20)
+        
+        # Left panel - CSV Import and Step Selection
+        left_panel = tk.Frame(main_container, bg=COLORS['bg_medium'], width=400)
+        left_panel.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 20))
+        
+        # CSV Import Card
+        import_card = self.create_card(left_panel, "Import Profiles")
+        import_card.pack(fill=tk.X, pady=(0, 20))
+        
+        import_desc = tk.Label(
+            import_card,
+            text="Upload CSV files to import profiles directly to database",
+            font=('Segoe UI', 10),
+            bg=COLORS['card_bg'],
+            fg=COLORS['text_secondary'],
+            wraplength=350
+        )
+        import_desc.pack(anchor='w', padx=20, pady=(0, 10))
+        
+        # Import buttons frame
+        import_btns = tk.Frame(import_card, bg=COLORS['card_bg'])
+        import_btns.pack(fill=tk.X, padx=20, pady=(0, 20))
+        
+        import_btn = tk.Button(
+            import_btns,
+            text="📁 Import CSV",
+            font=('Segoe UI', 11),
+            bg=COLORS['accent'],
+            fg=COLORS['text_primary'],
+            bd=0,
+            padx=20,
+            pady=8,
+            command=self.import_csv_to_db
+        )
+        import_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        multi_import_btn = tk.Button(
+            import_btns,
+            text="📁📁 Import Multiple",
+            font=('Segoe UI', 11),
+            bg=COLORS['accent'],
+            fg=COLORS['text_primary'],
+            bd=0,
+            padx=20,
+            pady=8,
+            command=self.import_multiple_csv
+        )
+        multi_import_btn.pack(side=tk.LEFT)
+        
+        # Step Selection Card
+        step_card = self.create_card(left_panel, "Step Selection")
+        step_card.pack(fill=tk.X, pady=(0, 20))
+        
+        # Instructions
+        instructions = tk.Label(
+            step_card,
+            text="Select which step to send messages to.\nThen click 'Start Automation' on Dashboard.",
+            font=('Segoe UI', 9),
+            bg=COLORS['card_bg'],
+            fg=COLORS['accent'],
+            justify=tk.LEFT,
+            wraplength=350
+        )
+        instructions.pack(anchor='w', padx=20, pady=(0, 15))
+        
+        # Step selector
+        step_select_frame = tk.Frame(step_card, bg=COLORS['card_bg'])
+        step_select_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
+        
+        step_label = tk.Label(
+            step_select_frame,
+            text="Select Step:",
+            font=('Segoe UI', 11),
+            bg=COLORS['card_bg'],
+            fg=COLORS['text_secondary']
+        )
+        step_label.pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.step_var = tk.IntVar(value=0)
+        step_options = [
+            ("Step 0: Not Contacted", 0),
+            ("Step 1: Initial Outreach", 1),
+            ("Step 2: First Follow-up", 2),
+            ("Step 3: Final Follow-up", 3),
+            ("Step 4: Re-engagement", 4)
+        ]
+        
+        step_menu = tk.OptionMenu(
+            step_select_frame,
+            self.step_var,
+            *[opt[1] for opt in step_options]
+        )
+        step_menu.config(
+            bg=COLORS['input_bg'],
+            fg=COLORS['text_primary'],
+            bd=0,
+            highlightthickness=0,
+            font=('Segoe UI', 10)
+        )
+        step_menu.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        # Eligible profiles count
+        self.eligible_label = tk.Label(
+            step_card,
+            text="Eligible profiles: Loading...",
+            font=('Segoe UI', 10),
+            bg=COLORS['card_bg'],
+            fg=COLORS['text_secondary']
+        )
+        self.eligible_label.pack(anchor='w', padx=20, pady=(0, 10))
+        
+        # Action buttons
+        action_frame = tk.Frame(step_card, bg=COLORS['card_bg'])
+        action_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
+        
+        refresh_btn = tk.Button(
+            action_frame,
+            text="🔄 Refresh Stats",
+            font=('Segoe UI', 11),
+            bg=COLORS['bg_light'],
+            fg=COLORS['text_primary'],
+            bd=0,
+            padx=15,
+            pady=8,
+            command=self.refresh_flow_stats
+        )
+        refresh_btn.pack(side=tk.LEFT)
+        
+        # Flow Statistics Card
+        stats_card = self.create_card(left_panel, "Flow Statistics")
+        stats_card.pack(fill=tk.X)
+        
+        self.flow_stats_text = tk.Text(
+            stats_card,
+            height=10,
+            bg=COLORS['input_bg'],
+            fg=COLORS['text_primary'],
+            font=('Consolas', 9),
+            bd=0,
+            wrap=tk.WORD
+        )
+        self.flow_stats_text.pack(fill=tk.X, padx=20, pady=(0, 20))
+        
+        # Right panel - Template Management
+        right_panel = tk.Frame(main_container, bg=COLORS['bg_medium'])
+        right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Templates Card
+        template_card = self.create_card(right_panel, "Message Templates")
+        template_card.pack(fill=tk.BOTH, expand=True)
+        
+        # Template display
+        template_frame = tk.Frame(template_card, bg=COLORS['card_bg'])
+        template_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
+        
+        # Template selector
+        template_select = tk.Frame(template_frame, bg=COLORS['card_bg'])
+        template_select.pack(fill=tk.X, pady=(0, 10))
+        
+        template_label = tk.Label(
+            template_select,
+            text="Current Template for Step:",
+            font=('Segoe UI', 10),
+            bg=COLORS['card_bg'],
+            fg=COLORS['text_secondary']
+        )
+        template_label.pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.template_step_var = tk.IntVar(value=1)
+        template_step_menu = tk.OptionMenu(
+            template_select,
+            self.template_step_var,
+            1, 2, 3, 4,
+            command=lambda x: self.load_template_for_step()
+        )
+        template_step_menu.config(
+            bg=COLORS['input_bg'],
+            fg=COLORS['text_primary'],
+            bd=0,
+            highlightthickness=0,
+            font=('Segoe UI', 10)
+        )
+        template_step_menu.pack(side=tk.LEFT)
+        
+        # Template text area
+        self.template_text = scrolledtext.ScrolledText(
+            template_frame,
+            height=15,
+            bg=COLORS['input_bg'],
+            fg=COLORS['text_primary'],
+            font=('Segoe UI', 10),
+            insertbackground=COLORS['accent'],
+            wrap=tk.WORD,
+            bd=0
+        )
+        self.template_text.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+        
+        # Template actions
+        template_actions = tk.Frame(template_card, bg=COLORS['card_bg'])
+        template_actions.pack(fill=tk.X, padx=20, pady=(0, 20))
+        
+        save_template_btn = tk.Button(
+            template_actions,
+            text="💾 Save Template",
+            font=('Segoe UI', 10),
+            bg=COLORS['accent'],
+            fg=COLORS['text_primary'],
+            bd=0,
+            padx=15,
+            pady=8,
+            command=self.save_template
+        )
+        save_template_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Wait days input
+        wait_frame = tk.Frame(template_actions, bg=COLORS['card_bg'])
+        wait_frame.pack(side=tk.LEFT, padx=(20, 0))
+        
+        wait_label = tk.Label(
+            wait_frame,
+            text="Wait days:",
+            font=('Segoe UI', 10),
+            bg=COLORS['card_bg'],
+            fg=COLORS['text_secondary']
+        )
+        wait_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.wait_days_var = tk.IntVar(value=3)
+        wait_spinbox = tk.Spinbox(
+            wait_frame,
+            from_=1,
+            to=30,
+            textvariable=self.wait_days_var,
+            width=5,
+            font=('Segoe UI', 10),
+            bg=COLORS['input_bg'],
+            fg=COLORS['text_primary'],
+            bd=0
+        )
+        wait_spinbox.pack(side=tk.LEFT)
+        
+        # Load initial data
+        self.refresh_flow_stats()
+        self.load_template_for_step()
+    
+    def create_accounts_tab(self, parent):
+        """Create accounts management interface"""
+        # Title
+        title = tk.Label(
+            parent,
+            text="Accounts Manager",
+            font=('Segoe UI', 24, 'bold'),
+            bg=COLORS['bg_medium'],
+            fg=COLORS['text_primary']
+        )
+        title.pack(anchor='w', padx=20, pady=20)
+        
+        # Control frame
+        control_frame = tk.Frame(parent, bg=COLORS['bg_medium'])
+        control_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
+        
+        # Filter buttons
+        filter_label = tk.Label(
+            control_frame,
+            text="Filter by Step:",
+            font=('Segoe UI', 11),
+            bg=COLORS['bg_medium'],
+            fg=COLORS['text_secondary']
+        )
+        filter_label.pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.accounts_filter = tk.StringVar(value="all")
+        
+        filter_btns = [
+            ("All", "all"),
+            ("Step 0", "step0"),
+            ("Step 1", "step1"),
+            ("Step 2", "step2"),
+            ("Step 3", "step3"),
+            ("Step 4", "step4"),
+            ("Failed", "failed")
+        ]
+        
+        for text, value in filter_btns:
+            btn = tk.Radiobutton(
+                control_frame,
+                text=text,
+                variable=self.accounts_filter,
+                value=value,
+                font=('Segoe UI', 10),
+                bg=COLORS['bg_medium'],
+                fg=COLORS['text_primary'],
+                selectcolor=COLORS['accent'],
+                activebackground=COLORS['bg_medium'],
+                command=self.refresh_accounts
+            )
+            btn.pack(side=tk.LEFT, padx=5)
+        
+        # Search frame
+        search_frame = tk.Frame(control_frame, bg=COLORS['bg_medium'])
+        search_frame.pack(side=tk.RIGHT, padx=(20, 0))
+        
+        search_label = tk.Label(
+            search_frame,
+            text="Search:",
+            font=('Segoe UI', 10),
+            bg=COLORS['bg_medium'],
+            fg=COLORS['text_secondary']
+        )
+        search_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.search_var = tk.StringVar()
+        search_entry = tk.Entry(
+            search_frame,
+            textvariable=self.search_var,
+            font=('Segoe UI', 10),
+            bg=COLORS['input_bg'],
+            fg=COLORS['text_primary'],
+            bd=0,
+            width=20
+        )
+        search_entry.pack(side=tk.LEFT, padx=(0, 5))
+        search_entry.bind('<Return>', lambda e: self.refresh_accounts())
+        
+        search_btn = tk.Button(
+            search_frame,
+            text="🔍",
+            font=('Segoe UI', 10),
+            bg=COLORS['accent'],
+            fg=COLORS['text_primary'],
+            bd=0,
+            padx=10,
+            command=self.refresh_accounts
+        )
+        search_btn.pack(side=tk.LEFT)
+        
+        # Action buttons frame
+        action_frame = tk.Frame(parent, bg=COLORS['bg_medium'])
+        action_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
+        
+        # Bulk actions
+        tk.Label(
+            action_frame,
+            text="Bulk Actions:",
+            font=('Segoe UI', 10),
+            bg=COLORS['bg_medium'],
+            fg=COLORS['text_secondary']
+        ).pack(side=tk.LEFT, padx=(0, 10))
+        
+        delete_selected_btn = tk.Button(
+            action_frame,
+            text="🗑️ Delete Selected",
+            font=('Segoe UI', 10),
+            bg=COLORS['danger'],
+            fg=COLORS['text_primary'],
+            bd=0,
+            padx=15,
+            pady=5,
+            command=self.delete_selected_accounts
+        )
+        delete_selected_btn.pack(side=tk.LEFT, padx=5)
+        
+        reset_step_btn = tk.Button(
+            action_frame,
+            text="↺ Reset to Step 0",
+            font=('Segoe UI', 10),
+            bg=COLORS['accent'],
+            fg=COLORS['text_primary'],
+            bd=0,
+            padx=15,
+            pady=5,
+            command=self.reset_selected_to_step_zero
+        )
+        reset_step_btn.pack(side=tk.LEFT, padx=5)
+        
+        refresh_btn = tk.Button(
+            action_frame,
+            text="🔄 Refresh",
+            font=('Segoe UI', 10),
+            bg=COLORS['bg_light'],
+            fg=COLORS['text_primary'],
+            bd=0,
+            padx=15,
+            pady=5,
+            command=self.refresh_accounts
+        )
+        refresh_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Accounts display area
+        accounts_card = self.create_card(parent, "Accounts Database")
+        accounts_card.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
+        
+        # Create Treeview for accounts
+        tree_frame = tk.Frame(accounts_card, bg=COLORS['card_bg'])
+        tree_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
+        
+        # Scrollbars
+        vsb = tk.Scrollbar(tree_frame, orient="vertical")
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        hsb = tk.Scrollbar(tree_frame, orient="horizontal")
+        hsb.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # Treeview with checkboxes (using tags)
+        from tkinter import ttk
+        style = ttk.Style()
+        style.theme_use('default')
+        style.configure("Treeview",
+                       background=COLORS['input_bg'],
+                       foreground=COLORS['text_primary'],
+                       fieldbackground=COLORS['input_bg'],
+                       borderwidth=0)
+        style.configure("Treeview.Heading",
+                       background=COLORS['bg_light'],
+                       foreground=COLORS['text_primary'],
+                       borderwidth=0)
+        style.map('Treeview', background=[('selected', COLORS['accent'])])
+        
+        self.accounts_tree = ttk.Treeview(
+            tree_frame,
+            columns=('username', 'step', 'status', 'last_contacted', 'messages_sent', 'actions'),
+            show='tree headings',
+            yscrollcommand=vsb.set,
+            xscrollcommand=hsb.set,
+            selectmode='extended'  # Allow multiple selection
+        )
+        
+        vsb.config(command=self.accounts_tree.yview)
+        hsb.config(command=self.accounts_tree.xview)
+        
+        # Configure columns
+        self.accounts_tree.column('#0', width=0, stretch=tk.NO)
+        self.accounts_tree.column('username', width=200, anchor='w')
+        self.accounts_tree.column('step', width=80, anchor='center')
+        self.accounts_tree.column('status', width=100, anchor='center')
+        self.accounts_tree.column('last_contacted', width=150, anchor='w')
+        self.accounts_tree.column('messages_sent', width=120, anchor='center')
+        self.accounts_tree.column('actions', width=200, anchor='center')
+        
+        # Configure headings
+        self.accounts_tree.heading('username', text='Username')
+        self.accounts_tree.heading('step', text='Current Step')
+        self.accounts_tree.heading('status', text='Status')
+        self.accounts_tree.heading('last_contacted', text='Last Contacted')
+        self.accounts_tree.heading('messages_sent', text='Messages Sent')
+        self.accounts_tree.heading('actions', text='Quick Actions')
+        
+        # Bind double-click to edit
+        self.accounts_tree.bind('<Double-1>', self.edit_account)
+        
+        # Bind right-click for context menu
+        self.accounts_tree.bind('<Button-3>', self.show_account_context_menu)
+        
+        self.accounts_tree.pack(fill=tk.BOTH, expand=True)
+        
+        # Stats summary at bottom
+        stats_frame = tk.Frame(accounts_card, bg=COLORS['card_bg'])
+        stats_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
+        
+        self.accounts_stats_label = tk.Label(
+            stats_frame,
+            text="Loading accounts...",
+            font=('Segoe UI', 10),
+            bg=COLORS['card_bg'],
+            fg=COLORS['text_secondary']
+        )
+        self.accounts_stats_label.pack(anchor='w')
+    
     def create_settings_tab(self, parent):
         """Create settings interface"""
         # Title
@@ -361,9 +887,41 @@ class ModernInstagramAutomation:
         )
         title.pack(anchor='w', padx=20, pady=20)
         
-        # Settings container
-        settings_container = tk.Frame(parent, bg=COLORS['bg_medium'])
-        settings_container.pack(fill=tk.BOTH, expand=True, padx=20)
+        # Create scrollable frame
+        canvas_frame = tk.Frame(parent, bg=COLORS['bg_medium'])
+        canvas_frame.pack(fill=tk.BOTH, expand=True, padx=20)
+        
+        # Canvas and scrollbar
+        canvas = tk.Canvas(canvas_frame, bg=COLORS['bg_medium'], highlightthickness=0)
+        scrollbar = tk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview)
+        
+        # Settings container (will be inside canvas)
+        settings_container = tk.Frame(canvas, bg=COLORS['bg_medium'])
+        
+        # Configure canvas
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Pack scrollbar and canvas
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Create window in canvas
+        canvas_window = canvas.create_window((0, 0), window=settings_container, anchor='nw')
+        
+        # Configure scrolling
+        def configure_scroll_region(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            # Update canvas window width to match canvas
+            canvas.itemconfig(canvas_window, width=event.width)
+        
+        settings_container.bind('<Configure>', configure_scroll_region)
+        canvas.bind('<Configure>', lambda e: canvas.itemconfig(canvas_window, width=e.width))
+        
+        # Enable mousewheel scrolling
+        def on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        canvas.bind_all("<MouseWheel>", on_mousewheel)
         
         # Account Settings Card
         account_card = self.create_card(settings_container, "Instagram Account")
@@ -797,6 +1355,18 @@ Professional automation solution
         self.hide_all_tabs()
         self.dashboard_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
+    def show_flow_manager(self):
+        self.hide_all_tabs()
+        self.tab_container.pack(fill=tk.BOTH, expand=True)
+        self.flow_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        self.refresh_flow_stats()
+        
+    def show_accounts(self):
+        self.hide_all_tabs()
+        self.tab_container.pack(fill=tk.BOTH, expand=True)
+        self.accounts_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        self.refresh_accounts()
+        
     def show_settings(self):
         self.hide_all_tabs()
         self.tab_container.pack(fill=tk.BOTH, expand=True)
@@ -827,6 +1397,8 @@ Professional automation solution
         self.dashboard_frame.pack_forget()
         self.tab_container.pack_forget()
         self.settings_frame.pack_forget()
+        self.flow_frame.pack_forget()
+        self.accounts_frame.pack_forget()
         self.analytics_frame.pack_forget()
         self.logs_frame.pack_forget()
         self.targets_frame.pack_forget()
@@ -855,22 +1427,89 @@ Professional automation solution
         Config.MAX_DELAY_BETWEEN_MESSAGES = int(self.delay_slider.get() * 1.2)
         Config.MESSAGES_PER_SESSION = int(self.session_slider.get())
         
-        # Handle profile input
-        if self.input_method.get() == "csv":
-            Config.CSV_FILE = self.csv_path.get()
-        else:
-            # Create temporary CSV from direct input
-            usernames = self.direct_input.get('1.0', tk.END).strip().split('\n')
-            usernames = [u.strip() for u in usernames if u.strip()]
-            if not usernames:
-                messagebox.showerror("Error", "Please enter at least one username")
+        # Check database for profiles first
+        stats = self.db.get_flow_statistics()
+        
+        if stats['total_profiles'] > 0:
+            # We have profiles in database - use flow system
+            selected_step = self.step_var.get() if hasattr(self, 'step_var') else 0
+            self.log_message(f"Selected step for automation: {selected_step}", "info")
+            eligible_count = self.db.get_eligible_profiles_count(selected_step)
+            
+            # Debug: Show what profiles exist at each step
+            self.log_message(f"Database stats: {stats}", "info")
+            self.log_message(f"Eligible profiles at step {selected_step}: {eligible_count}", "info")
+            
+            if eligible_count == 0:
+                result = messagebox.askyesno(
+                    "No Eligible Profiles at Selected Step",
+                    f"No profiles ready for Step {selected_step}.\n\n"
+                    f"Database has {stats['total_profiles']} total profiles:\n" +
+                    "\n".join([f"  Step {s}: {c}" for s, c in sorted(stats['profiles_by_step'].items())]) +
+                    f"\n\nWould you like to go to Flow Manager to select a different step?"
+                )
+                if result:
+                    self.show_flow_manager()
                 return
-                
-            with open('temp_profiles.csv', 'w') as f:
-                f.write("username\n")
-                for username in usernames:
-                    f.write(f"{username}\n")
-            Config.CSV_FILE = 'temp_profiles.csv'
+            
+            # Get template for preview
+            next_step = selected_step + 1 if selected_step == 0 else selected_step
+            template = self.db.get_template_for_step(next_step)
+            template_preview = template['message_content'][:80] + "..." if template else "Default message"
+            
+            # Step descriptions
+            step_names = {
+                0: "Step 0 → Step 1 (Initial Outreach)",
+                1: "Step 1 → Step 2 (First Follow-up)",
+                2: "Step 2 → Step 3 (Final Follow-up)",
+                3: "Step 3 → Step 4 (Re-engagement)"
+            }
+            step_desc = step_names.get(selected_step, f"Step {selected_step}")
+            
+            # Confirm
+            confirm = messagebox.askyesno(
+                "Start Automation",
+                f"Send messages using Flow System?\n\n"
+                f"Action: {step_desc}\n"
+                f"Profiles to contact: {eligible_count}\n\n"
+                f"Template: {template_preview}\n\n"
+                f"Continue?"
+            )
+            
+            if not confirm:
+                return
+            
+            # Set flow mode
+            self.automation_step_filter = selected_step
+            
+        else:
+            # No profiles in database - fall back to CSV/direct input
+            result = messagebox.askyesno(
+                "No Profiles in Database",
+                "Database is empty. Import profiles in Flow Manager first?\n\n"
+                "Click 'No' to use CSV file/direct input instead (old method)."
+            )
+            
+            if result:
+                self.show_flow_manager()
+                return
+            
+            # Continue with CSV/direct input
+            if self.input_method.get() == "csv":
+                Config.CSV_FILE = self.csv_path.get()
+            else:
+                # Create temporary CSV from direct input
+                usernames = self.direct_input.get('1.0', tk.END).strip().split('\n')
+                usernames = [u.strip() for u in usernames if u.strip()]
+                if not usernames:
+                    messagebox.showerror("Error", "Please enter at least one username")
+                    return
+                    
+                with open('temp_profiles.csv', 'w') as f:
+                    f.write("username\n")
+                    for username in usernames:
+                        f.write(f"{username}\n")
+                Config.CSV_FILE = 'temp_profiles.csv'
             
         # Start automation
         self.is_running = True
@@ -914,8 +1553,22 @@ Professional automation solution
         try:
             from main import InstagramDMAutomation
             
+            # Check if we're using flow system
+            use_flow = hasattr(self, 'automation_step_filter')
+            step_filter = getattr(self, 'automation_step_filter', None)
+            
+            self.log_message(f"Flow mode: {use_flow}, Step filter: {step_filter}", "info")
+            
             # Create automation instance
-            self.automation_instance = InstagramDMAutomation(setup_signal_handler=False)
+            self.automation_instance = InstagramDMAutomation(
+                setup_signal_handler=False,
+                step_filter=step_filter,
+                use_flow=use_flow
+            )
+            
+            # Clear step filter after creating instance
+            if hasattr(self, 'automation_step_filter'):
+                delattr(self, 'automation_step_filter')
             
             # Redirect logs to our queue
             def log_handler(message, level="info"):
@@ -992,6 +1645,125 @@ Professional automation solution
         if int(self.log_text.index('end-1c').split('.')[0]) > 1000:
             self.log_text.delete('1.0', '100.0')
             
+    def load_historical_stats(self):
+        """Load historical statistics on startup"""
+        try:
+            # Get all-time stats
+            stats = self.db.get_statistics()
+            
+            # Update dashboard with historical data
+            if 'Messages Sent' in self.stat_labels:
+                self.stat_labels['Messages Sent'].config(text=str(stats['successful']))
+            if 'Failed' in self.stat_labels:
+                self.stat_labels['Failed'].config(text=str(stats['failed']))
+            if 'Success Rate' in self.stat_labels:
+                self.stat_labels['Success Rate'].config(text=f"{stats['success_rate']:.1f}%")
+            
+            # Store totals
+            self.total_sent = stats['successful']
+            self.total_failed = stats['failed']
+            
+            # Log to preview
+            self.log_message(f"Loaded {stats['total']} historical results from database", "info")
+            
+        except Exception as e:
+            self.log_message(f"Error loading historical data: {str(e)}", "error")
+    
+    def refresh_accounts(self):
+        """Refresh accounts display based on filters"""
+        try:
+            # Clear existing items
+            for item in self.accounts_tree.get_children():
+                self.accounts_tree.delete(item)
+            
+            # Get filter
+            filter_value = self.accounts_filter.get()
+            search_query = self.search_var.get().strip()
+            
+            # Fetch data based on filter
+            if search_query:
+                results = self.db.search_profiles(search_query)
+            elif filter_value == "all":
+                results = self.db.get_all_results(limit=5000)
+            elif filter_value.startswith("step"):
+                step_num = int(filter_value.replace("step", ""))
+                results = self.db.search_profiles_advanced(step=step_num)
+            elif filter_value == "failed":
+                results = self.db.get_all_results(limit=5000, status="failed")
+            else:
+                results = self.db.get_all_results(limit=5000)
+            
+            # Populate tree
+            for result in results:
+                # Username
+                username = result['username']
+                
+                # Step info
+                current_step = result.get('current_step', 0)
+                step_text = f"Step {current_step}"
+                
+                # Status
+                status = result.get('status', 'pending')
+                if status == 'success' or status == 'active':
+                    status_emoji = "✓"
+                    status_text = "Active"
+                    tags = ('active',)
+                elif status == 'failed':
+                    status_emoji = "✗"
+                    status_text = "Failed"
+                    tags = ('failed',)
+                else:
+                    status_emoji = "○"
+                    status_text = "Pending"
+                    tags = ('pending',)
+                
+                # Last contacted
+                last_contacted = result.get('last_contacted')
+                if last_contacted:
+                    try:
+                        ts = datetime.fromisoformat(last_contacted)
+                        last_contacted_str = ts.strftime("%Y-%m-%d %H:%M")
+                    except:
+                        last_contacted_str = "Never"
+                else:
+                    last_contacted_str = "Never"
+                
+                # Messages sent
+                messages_sent = result.get('total_messages_sent', 0)
+                
+                # Actions (just text, actual buttons via context menu)
+                actions = "Double-click or Right-click"
+                
+                self.accounts_tree.insert('', 'end', values=(
+                    username,
+                    step_text,
+                    f"{status_emoji} {status_text}",
+                    last_contacted_str,
+                    messages_sent,
+                    actions
+                ), tags=tags)
+            
+            # Configure tag colors
+            self.accounts_tree.tag_configure('active', foreground=COLORS['success'])
+            self.accounts_tree.tag_configure('failed', foreground=COLORS['danger'])
+            self.accounts_tree.tag_configure('pending', foreground=COLORS['text_secondary'])
+            
+            # Update stats label
+            total = len(results)
+            by_step = {}
+            for r in results:
+                step = r.get('current_step', 0)
+                by_step[step] = by_step.get(step, 0) + 1
+            
+            step_summary = " | ".join([f"Step {s}: {c}" for s, c in sorted(by_step.items())])
+            
+            self.accounts_stats_label.config(
+                text=f"Total: {total} accounts | {step_summary}"
+            )
+            
+        except Exception as e:
+            self.log_message(f"Error refreshing accounts: {str(e)}", "error")
+    
     def update_statistics(self, stats):
         """Update statistics display"""
         # Calculate success rate
@@ -1096,6 +1868,67 @@ INSTAGRAM_PASSWORD={self.password_entry.get()}"""
                 
         except Exception as e:
             messagebox.showerror("Error", f"Export failed: {str(e)}")
+    
+    def export_failure_report(self):
+        """Export detailed failure analysis report"""
+        try:
+            processor = CSVProcessor(Config.CSV_FILE)
+            
+            # Check if there are any failures
+            stats = processor.get_failure_statistics()
+            if not stats:
+                messagebox.showinfo("No Failures", "No failures to analyze. All messages were sent successfully!")
+                return
+            
+            # Generate detailed report
+            reports = processor.export_detailed_failure_report()
+            
+            if reports:
+                detailed_file, summary_file = reports
+                
+                # Create informative message
+                error_breakdown = "\n".join([
+                    f"  • {error}: {count}"
+                    for error, count in sorted(
+                        stats['error_breakdown'].items(),
+                        key=lambda x: x[1],
+                        reverse=True
+                    )
+                ])
+                
+                message = f"""Failure Analysis Complete!
+
+Total Failures: {stats['total_failures']}
+
+Error Breakdown:
+{error_breakdown}
+
+Most Common: {stats['most_common_error']}
+
+Reports Generated:
+✓ Detailed: {detailed_file}
+✓ Summary: {summary_file}
+
+Each report includes:
+- Error category
+- Detailed description
+- Recommended action
+"""
+                
+                messagebox.showinfo("Failure Analysis", message)
+                
+                # Open folder
+                if sys.platform == 'win32':
+                    os.startfile(os.getcwd())
+                elif sys.platform == 'darwin':
+                    subprocess.run(['open', os.getcwd()])
+                else:
+                    subprocess.run(['xdg-open', os.getcwd()])
+            else:
+                messagebox.showinfo("Info", "No failure data available")
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to generate report: {str(e)}")
             
     def export_logs(self):
         """Export logs to file"""
@@ -1116,6 +1949,311 @@ INSTAGRAM_PASSWORD={self.password_entry.get()}"""
                 self.root.destroy()
         else:
             self.root.destroy()
+    
+    # Flow Management Methods
+    
+    def import_csv_to_db(self):
+        """Import single CSV file to database"""
+        from tkinter import filedialog
+        
+        filename = filedialog.askopenfilename(
+            title="Select CSV file",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+        
+        if filename:
+            try:
+                tag = os.path.basename(filename).replace('.csv', '')
+                imported_count = self.db.import_csv_profiles(filename, tag=tag)
+                self.log_message(f"✓ Imported {imported_count} profiles from {os.path.basename(filename)}", "success")
+                messagebox.showinfo("Import Success", f"Successfully imported {imported_count} profiles!")
+                self.refresh_flow_stats()
+            except Exception as e:
+                self.log_message(f"Failed to import CSV: {str(e)}", "error")
+                messagebox.showerror("Import Failed", str(e))
+    
+    def import_multiple_csv(self):
+        """Import multiple CSV files to database"""
+        from tkinter import filedialog
+        
+        filenames = filedialog.askopenfilenames(
+            title="Select CSV files",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+        
+        if filenames:
+            total_imported = 0
+            failed_files = []
+            
+            for filename in filenames:
+                try:
+                    tag = os.path.basename(filename).replace('.csv', '')
+                    imported_count = self.db.import_csv_profiles(filename, tag=tag)
+                    total_imported += imported_count
+                    self.log_message(f"✓ Imported {imported_count} from {os.path.basename(filename)}", "success")
+                except Exception as e:
+                    failed_files.append((filename, str(e)))
+                    self.log_message(f"Failed to import {os.path.basename(filename)}: {str(e)}", "error")
+            
+            # Show summary
+            message = f"Imported {total_imported} profiles from {len(filenames) - len(failed_files)} files."
+            if failed_files:
+                message += f"\n\nFailed files:\n" + "\n".join([f"- {os.path.basename(f)}: {e}" for f, e in failed_files])
+            
+            messagebox.showinfo("Import Complete", message)
+            self.refresh_flow_stats()
+    
+    def refresh_flow_stats(self):
+        """Refresh flow statistics display"""
+        try:
+            # Get flow statistics
+            stats = self.db.get_flow_statistics()
+            
+            # Update eligible profiles count
+            step = self.step_var.get() if hasattr(self, 'step_var') else 0
+            eligible_count = self.db.get_eligible_profiles_count(step)
+            
+            if hasattr(self, 'eligible_label'):
+                self.eligible_label.config(text=f"Eligible profiles: {eligible_count}")
+            
+            # Format statistics text
+            stats_text = []
+            stats_text.append(f"Total Profiles: {stats['total_profiles']}")
+            stats_text.append(f"Pending (Not Contacted): {stats['pending_profiles']}")
+            stats_text.append("\n--- Profiles by Step ---")
+            
+            for step_num, count in sorted(stats['profiles_by_step'].items()):
+                step_names = {
+                    0: "Not Contacted",
+                    1: "Initial Outreach",
+                    2: "First Follow-up",
+                    3: "Final Follow-up",
+                    4: "Re-engagement"
+                }
+                step_name = step_names.get(step_num, f"Step {step_num}")
+                stats_text.append(f"Step {step_num} ({step_name}): {count}")
+            
+            stats_text.append("\n--- Messages Sent ---")
+            for step_num, count in sorted(stats.get('messages_sent_by_step', {}).items()):
+                stats_text.append(f"Step {step_num}: {count} messages")
+            
+            # Update text widget if it exists
+            if hasattr(self, 'flow_stats_text'):
+                self.flow_stats_text.config(state=tk.NORMAL)
+                self.flow_stats_text.delete('1.0', tk.END)
+                self.flow_stats_text.insert('1.0', '\n'.join(stats_text))
+                self.flow_stats_text.config(state=tk.DISABLED)
+            
+        except Exception as e:
+            self.log_message(f"Error refreshing flow stats: {str(e)}", "error")
+    
+    def load_template_for_step(self):
+        """Load template for selected step"""
+        if not hasattr(self, 'template_step_var'):
+            return
+            
+        try:
+            step = self.template_step_var.get()
+            template = self.db.get_template_for_step(step)
+            
+            if template:
+                self.template_text.delete('1.0', tk.END)
+                self.template_text.insert('1.0', template['message_content'])
+                self.wait_days_var.set(template['wait_days_before_next'])
+            else:
+                self.template_text.delete('1.0', tk.END)
+                self.template_text.insert('1.0', f"No template found for step {step}")
+        
+        except Exception as e:
+            self.log_message(f"Error loading template: {str(e)}", "error")
+    
+    def save_template(self):
+        """Save current template"""
+        try:
+            step = self.template_step_var.get()
+            message_content = self.template_text.get('1.0', tk.END).strip()
+            wait_days = self.wait_days_var.get()
+            
+            # Get existing template
+            existing = self.db.get_template_for_step(step)
+            
+            if existing:
+                # Update existing
+                self.db.update_template(existing['id'], 
+                                       message_content=message_content,
+                                       wait_days=wait_days)
+                self.log_message(f"✓ Updated template for step {step}", "success")
+            else:
+                # Create new
+                self.db.add_message_template(step, f"Step {step} Template", 
+                                            message_content, wait_days)
+                self.log_message(f"✓ Created template for step {step}", "success")
+            
+            messagebox.showinfo("Success", f"Template for step {step} saved!")
+            
+        except Exception as e:
+            self.log_message(f"Error saving template: {str(e)}", "error")
+            messagebox.showerror("Save Failed", str(e))
+    
+    # Account Management Methods
+    
+    def delete_selected_accounts(self):
+        """Delete selected accounts from database"""
+        selected_items = self.accounts_tree.selection()
+        
+        if not selected_items:
+            messagebox.showinfo("No Selection", "Please select accounts to delete")
+            return
+        
+        # Confirm deletion
+        count = len(selected_items)
+        if not messagebox.askyesno("Confirm Delete", f"Delete {count} selected account(s)?\n\nThis cannot be undone!"):
+            return
+        
+        try:
+            deleted = 0
+            for item in selected_items:
+                values = self.accounts_tree.item(item)['values']
+                username = values[0]
+                
+                # Delete from database
+                with self.db.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM profiles WHERE username = ?", (username,))
+                    cursor.execute("DELETE FROM flow_history WHERE profile_id IN (SELECT id FROM profiles WHERE username = ?)", (username,))
+                deleted += 1
+            
+            messagebox.showinfo("Success", f"Deleted {deleted} account(s)")
+            self.refresh_accounts()
+            self.refresh_flow_stats()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to delete accounts: {str(e)}")
+    
+    def reset_selected_to_step_zero(self):
+        """Reset selected accounts to Step 0"""
+        selected_items = self.accounts_tree.selection()
+        
+        if not selected_items:
+            messagebox.showinfo("No Selection", "Please select accounts to reset")
+            return
+        
+        count = len(selected_items)
+        if not messagebox.askyesno("Confirm Reset", f"Reset {count} account(s) to Step 0?"):
+            return
+        
+        try:
+            reset = 0
+            for item in selected_items:
+                values = self.accounts_tree.item(item)['values']
+                username = values[0]
+                
+                # Reset in database
+                with self.db.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        UPDATE profiles 
+                        SET current_step = 0, 
+                            status = 'pending',
+                            last_contacted = NULL,
+                            next_step_eligible = NULL
+                        WHERE username = ?
+                    """, (username,))
+                reset += 1
+            
+            messagebox.showinfo("Success", f"Reset {reset} account(s) to Step 0")
+            self.refresh_accounts()
+            self.refresh_flow_stats()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to reset accounts: {str(e)}")
+    
+    def edit_account(self, event=None):
+        """Edit selected account"""
+        selected_items = self.accounts_tree.selection()
+        
+        if not selected_items:
+            return
+        
+        item = selected_items[0]
+        values = self.accounts_tree.item(item)['values']
+        username = values[0]
+        
+        # Create edit dialog
+        edit_window = tk.Toplevel(self.root)
+        edit_window.title(f"Edit Account: {username}")
+        edit_window.geometry("400x300")
+        edit_window.configure(bg=COLORS['bg_medium'])
+        edit_window.transient(self.root)
+        edit_window.grab_set()
+        
+        # Get account data
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM profiles WHERE username = ?", (username,))
+            account = dict(cursor.fetchone())
+        
+        # Username (read-only)
+        tk.Label(edit_window, text="Username:", bg=COLORS['bg_medium'], fg=COLORS['text_secondary']).pack(pady=(20, 5))
+        username_label = tk.Label(edit_window, text=username, font=('Segoe UI', 12, 'bold'), 
+                                 bg=COLORS['bg_medium'], fg=COLORS['text_primary'])
+        username_label.pack()
+        
+        # Current Step
+        tk.Label(edit_window, text="Current Step:", bg=COLORS['bg_medium'], fg=COLORS['text_secondary']).pack(pady=(10, 5))
+        step_var = tk.IntVar(value=account['current_step'])
+        step_spinbox = tk.Spinbox(edit_window, from_=0, to=4, textvariable=step_var, width=10)
+        step_spinbox.pack()
+        
+        # Status
+        tk.Label(edit_window, text="Status:", bg=COLORS['bg_medium'], fg=COLORS['text_secondary']).pack(pady=(10, 5))
+        status_var = tk.StringVar(value=account['status'])
+        status_options = ['pending', 'active', 'success', 'failed']
+        status_dropdown = tk.OptionMenu(edit_window, status_var, *status_options)
+        status_dropdown.config(bg=COLORS['input_bg'], fg=COLORS['text_primary'])
+        status_dropdown.pack()
+        
+        # Save button
+        def save_changes():
+            try:
+                with self.db.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        UPDATE profiles 
+                        SET current_step = ?, status = ?
+                        WHERE username = ?
+                    """, (step_var.get(), status_var.get(), username))
+                
+                messagebox.showinfo("Success", "Account updated")
+                edit_window.destroy()
+                self.refresh_accounts()
+                self.refresh_flow_stats()
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to update: {str(e)}")
+        
+        save_btn = tk.Button(edit_window, text="💾 Save Changes", 
+                           bg=COLORS['accent'], fg=COLORS['text_primary'],
+                           command=save_changes, bd=0, padx=20, pady=10)
+        save_btn.pack(pady=20)
+    
+    def show_account_context_menu(self, event):
+        """Show right-click context menu for account"""
+        # Select the item under cursor
+        item = self.accounts_tree.identify_row(event.y)
+        if item:
+            self.accounts_tree.selection_set(item)
+            
+            # Create context menu
+            context_menu = tk.Menu(self.root, tearoff=0, bg=COLORS['card_bg'], fg=COLORS['text_primary'])
+            context_menu.add_command(label="✏️ Edit", command=self.edit_account)
+            context_menu.add_command(label="↺ Reset to Step 0", command=self.reset_selected_to_step_zero)
+            context_menu.add_separator()
+            context_menu.add_command(label="🗑️ Delete", command=self.delete_selected_accounts)
+            
+            # Show menu at cursor
+            context_menu.post(event.x_root, event.y_root)
+    
 
 def main():
     """Main entry point"""

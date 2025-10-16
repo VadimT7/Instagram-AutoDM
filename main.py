@@ -20,7 +20,7 @@ from config import Config
 init(autoreset=True)
 
 class InstagramDMAutomation:
-    def __init__(self, setup_signal_handler=True):
+    def __init__(self, setup_signal_handler=True, step_filter=None, use_flow=False):
         self.setup_logging()
         self.browser_manager = None
         self.driver = None
@@ -30,6 +30,9 @@ class InstagramDMAutomation:
         self.session_message_count = 0
         self.last_reset_date = datetime.now().date()
         self.running = True
+        self.step_filter = step_filter  # Filter for specific flow step
+        self.use_flow = use_flow  # Use flow system with database
+        self.db = self.csv_processor.db  # Database access
         
         # Setup signal handler for graceful shutdown (only in main thread)
         if setup_signal_handler:
@@ -176,49 +179,91 @@ class InstagramDMAutomation:
         
         return base_delay
     
-    def process_profile(self, profile_url):
+    def process_profile(self, profile_url, profile_data=None):
         """Process a single Instagram profile"""
         try:
             self.print_status(f"Processing: {profile_url}", "info")
             
             # Navigate to profile
             if not self.instagram.navigate_to_profile(profile_url):
-                self.print_status("Failed to navigate to profile", "error")
+                error_msg = "Failed to navigate to profile"
+                self.print_status(error_msg, "error")
+                self.csv_processor.mark_profile_processed(
+                    profile_url, "failed", error_msg, 
+                    error_type=self.csv_processor.categorize_error(error_msg)
+                )
                 return False
             
             # Random delay to seem natural
             time.sleep(random.uniform(2, 5))
             
-            # Follow the profile first
-            self.print_status("Attempting to follow profile...", "info")
-            self.instagram.follow_profile()  # Non-critical, continue even if fails
-            
-            # Random delay after following
-            time.sleep(random.uniform(1, 3))
+            # Follow the profile first (only on first contact)
+            if not profile_data or profile_data.get('current_step', 0) <= 1:
+                self.print_status("Attempting to follow profile...", "info")
+                self.instagram.follow_profile()  # Non-critical, continue even if fails
+                
+                # Random delay after following
+                time.sleep(random.uniform(1, 3))
             
             # Click message button (on the profile, not sidebar)
             self.print_status("Looking for Message button on profile...", "info")
             if not self.instagram.click_message_button():
-                self.print_status("Could not find or click Message button", "warning")
+                error_msg = "Message button not found on profile"
+                self.print_status(error_msg, "warning")
                 self.instagram.handle_popups()
+                self.csv_processor.mark_profile_processed(
+                    profile_url, "failed", error_msg,
+                    error_type=self.csv_processor.categorize_error(error_msg)
+                )
                 return False
             
             # Wait for message window to open
             time.sleep(random.uniform(3, 6))
             
-            # Get message text (can use variations)
-            if random.random() < 0.3:  # 30% chance of variation
-                messages = Config.get_message_variations()
-                message_text = random.choice(messages)
+            # Get message text based on flow step or default
+            if self.use_flow and profile_data:
+                # Get template for the current step
+                current_step = profile_data.get('current_step', 0)
+                next_step = current_step + 1 if current_step == 0 else current_step
+                
+                template = self.db.get_template_for_step(next_step)
+                if template:
+                    message_text = template['message_content']
+                    self.print_status(f"Using template for step {next_step}", "info")
+                else:
+                    # Fall back to default
+                    message_text = Config.DEFAULT_MESSAGE
+                    self.print_status(f"No template for step {next_step}, using default", "warning")
             else:
-                message_text = Config.DEFAULT_MESSAGE
+                # Original behavior - use variations
+                if random.random() < 0.3:  # 30% chance of variation
+                    messages = Config.get_message_variations()
+                    message_text = random.choice(messages)
+                else:
+                    message_text = Config.DEFAULT_MESSAGE
             
             # Send message
             if not self.instagram.send_message(message_text):
-                self.print_status("Failed to send message", "error")
+                error_msg = "Failed to send message - input field not found"
+                self.print_status(error_msg, "error")
+                self.csv_processor.mark_profile_processed(
+                    profile_url, "failed", error_msg,
+                    error_type=self.csv_processor.categorize_error(error_msg)
+                )
                 return False
             
-            self.print_status(f"Message sent successfully: '{message_text}'", "success")
+            self.print_status(f"Message sent successfully!", "success")
+            
+            # Update database if using flow
+            if self.use_flow and profile_data:
+                profile_id = profile_data.get('id')
+                if profile_id:
+                    # Update to next step
+                    current_step = profile_data.get('current_step', 0)
+                    next_step = current_step + 1 if current_step == 0 else current_step
+                    wait_days = template.get('wait_days_before_next', 3) if 'template' in locals() else 3
+                    self.db.update_profile_step(profile_id, next_step, message_text, wait_days)
+                    self.print_status(f"Profile updated to step {next_step}", "info")
             
             # Update counters
             self.daily_message_count += 1
@@ -230,8 +275,12 @@ class InstagramDMAutomation:
             return True
             
         except Exception as e:
-            self.logger.error(f"Error processing profile {profile_url}: {e}")
-            self.csv_processor.mark_profile_processed(profile_url, "failed", str(e))
+            error_msg = str(e)
+            self.logger.error(f"Error processing profile {profile_url}: {error_msg}")
+            self.csv_processor.mark_profile_processed(
+                profile_url, "failed", error_msg,
+                error_type=self.csv_processor.categorize_error(error_msg)
+            )
             return False
     
     def take_session_break(self):
@@ -251,19 +300,41 @@ class InstagramDMAutomation:
     def run_automation(self):
         """Main automation loop"""
         try:
-            # Load CSV file
-            if not self.csv_processor.load_csv():
-                self.print_status("Failed to load CSV file", "error")
-                return
-            
-            # Get unprocessed profiles
-            profiles = self.csv_processor.get_unprocessed_profiles()
-            
-            if not profiles:
-                self.print_status("No unprocessed profiles found", "warning")
-                return
-            
-            self.print_status(f"Found {len(profiles)} profiles to process", "info")
+            # Check if we're using flow system
+            if self.use_flow and hasattr(self, 'db'):
+                self.print_status(f"Using flow system with step filter: {self.step_filter}", "info")
+                
+                # Use database profiles for flow system
+                profiles_data = self.db.get_profiles_by_step(self.step_filter)
+                
+                self.print_status(f"Database query returned {len(profiles_data)} profiles", "info")
+                
+                if not profiles_data:
+                    self.print_status(f"No profiles found at step {self.step_filter}", "warning")
+                    return
+                
+                # Convert to format expected by automation
+                profiles = []
+                for profile_data in profiles_data:
+                    profile_url = f"https://www.instagram.com/{profile_data['username']}/"
+                    profiles.append((profile_url, profile_data))
+                
+                self.print_status(f"Found {len(profiles)} profiles at step {self.step_filter}", "info")
+            else:
+                # Use CSV file (legacy mode)
+                if not self.csv_processor.load_csv():
+                    self.print_status("Failed to load CSV file", "error")
+                    return
+                
+                # Get unprocessed profiles
+                profiles = self.csv_processor.get_unprocessed_profiles()
+                
+                if not profiles:
+                    self.print_status("No unprocessed profiles found", "warning")
+                    return
+                
+                # Convert to format expected by automation
+                profiles = [(profile_url, None) for profile_url in profiles]
             
             # Initialize browser and login
             if not self.initialize_browser():
@@ -273,9 +344,16 @@ class InstagramDMAutomation:
                 return
             
             # Process profiles
-            for i, profile_url in enumerate(profiles):
+            for i, profile_info in enumerate(profiles):
                 if not self.running:
                     break
+                
+                # Extract profile URL and data
+                if isinstance(profile_info, tuple):
+                    profile_url, profile_data = profile_info
+                else:
+                    profile_url = profile_info
+                    profile_data = None
                 
                 # Check daily limit
                 if not self.check_daily_limit():
@@ -292,7 +370,7 @@ class InstagramDMAutomation:
                 
                 success = False
                 for retry in range(Config.MAX_RETRIES):
-                    if self.process_profile(profile_url):
+                    if self.process_profile(profile_url, profile_data):
                         success = True
                         break
                     else:
@@ -302,6 +380,7 @@ class InstagramDMAutomation:
                 
                 if not success:
                     self.print_status(f"Failed to process profile after {Config.MAX_RETRIES} attempts", "error")
+                    self.print_status("Moving to next profile...", "info")
                 
                 # Check session limit
                 if self.session_message_count >= Config.MESSAGES_PER_SESSION:
@@ -351,6 +430,14 @@ class InstagramDMAutomation:
             self.print_status(f"Successful sends exported to {success_file}", "success")
         if fail_file:
             self.print_status(f"Unsuccessful sends exported to {fail_file}", "warning")
+        
+        # Export detailed failure analysis report if there are failures
+        if stats['failed'] > 0:
+            print()  # Add spacing
+            failure_reports = self.csv_processor.export_detailed_failure_report()
+            if failure_reports:
+                detailed_file, summary_file = failure_reports
+                self.print_status("Detailed failure analysis completed", "success")
     
     def cleanup(self):
         """Cleanup resources"""
