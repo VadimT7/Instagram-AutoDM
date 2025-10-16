@@ -404,6 +404,40 @@ class ModernInstagramAutomation:
         self.message_text.pack(fill=tk.X, padx=20, pady=(0, 20))
         self.message_text.insert('1.0', Config.DEFAULT_MESSAGE)
         
+        # Browser Settings Card
+        browser_card = self.create_card(settings_container, "Browser Options")
+        browser_card.pack(fill=tk.X, pady=(0, 20))
+        
+        # Headless mode checkbox
+        headless_frame = tk.Frame(browser_card, bg=COLORS['card_bg'])
+        headless_frame.pack(fill=tk.X, padx=20, pady=(10, 20))
+        
+        self.headless_var = tk.BooleanVar(value=Config.HEADLESS_MODE)
+        
+        headless_check = tk.Checkbutton(
+            headless_frame,
+            text="Headless Mode (Run browser in background)",
+            variable=self.headless_var,
+            font=('Segoe UI', 11),
+            bg=COLORS['card_bg'],
+            fg=COLORS['text_primary'],
+            selectcolor=COLORS['input_bg'],
+            activebackground=COLORS['card_bg'],
+            activeforeground=COLORS['accent']
+        )
+        headless_check.pack(anchor='w')
+        
+        headless_desc = tk.Label(
+            headless_frame,
+            text="When enabled, browser runs invisibly. Disable to see automation in action.",
+            font=('Segoe UI', 9),
+            bg=COLORS['card_bg'],
+            fg=COLORS['text_secondary'],
+            wraplength=600,
+            justify='left'
+        )
+        headless_desc.pack(anchor='w', pady=(5, 0))
+        
         # Performance Settings Card
         perf_card = self.create_card(settings_container, "Performance")
         perf_card.pack(fill=tk.X, pady=(0, 20))
@@ -816,6 +850,7 @@ Professional automation solution
         Config.INSTAGRAM_USERNAME = self.username_entry.get()
         Config.INSTAGRAM_PASSWORD = self.password_entry.get()
         Config.DEFAULT_MESSAGE = self.message_text.get('1.0', tk.END).strip()
+        Config.HEADLESS_MODE = self.headless_var.get()
         Config.MIN_DELAY_BETWEEN_MESSAGES = int(self.delay_slider.get() * 0.8)
         Config.MAX_DELAY_BETWEEN_MESSAGES = int(self.delay_slider.get() * 1.2)
         Config.MESSAGES_PER_SESSION = int(self.session_slider.get())
@@ -1018,11 +1053,12 @@ INSTAGRAM_PASSWORD={self.password_entry.get()}"""
             
         # Update config
         Config.DEFAULT_MESSAGE = self.message_text.get('1.0', tk.END).strip()
+        Config.HEADLESS_MODE = self.headless_var.get()
         Config.MIN_DELAY_BETWEEN_MESSAGES = int(self.delay_slider.get() * 0.8)
         Config.MAX_DELAY_BETWEEN_MESSAGES = int(self.delay_slider.get() * 1.2)
         Config.MESSAGES_PER_SESSION = int(self.session_slider.get())
         
-        messagebox.showinfo("Success", "Settings saved successfully!")
+        messagebox.showinfo("Success", f"Settings saved successfully!\n\nHeadless Mode: {'Enabled' if self.headless_var.get() else 'Disabled'}")
         
     def browse_csv(self):
         """Browse for CSV file"""
