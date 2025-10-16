@@ -1,0 +1,27 @@
+[Unit]
+Description=Instagram DM Automation Service
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/instagram-automation
+Environment="PATH=/home/ubuntu/instagram-automation/venv/bin"
+ExecStart=/home/ubuntu/instagram-automation/deploy/run_headless.sh
+
+# Restart policy
+Restart=on-failure
+RestartSec=30
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=instagram-automation
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+
