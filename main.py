@@ -197,13 +197,19 @@ class InstagramDMAutomation:
             # Random delay to seem natural
             time.sleep(random.uniform(2, 5))
             
-            # Follow the profile first (only on first contact)
-            if not profile_data or profile_data.get('current_step', 0) <= 1:
+            # Follow the profile first (only on first contact if enabled)
+            if Config.ENABLE_FOLLOW and (not profile_data or profile_data.get('current_step', 0) <= 1):
                 self.print_status("Attempting to follow profile...", "info")
-                self.instagram.follow_profile()  # Non-critical, continue even if fails
+                follow_result = self.instagram.follow_profile()
                 
-                # Random delay after following
+                if not follow_result and not Config.ENABLE_FOLLOW:
+                    # Rate limit detected and following was disabled
+                    self.print_status("Following disabled due to Instagram rate limit", "warning")
+                
+                # Random delay after following (or after skip)
                 time.sleep(random.uniform(1, 3))
+            elif not Config.ENABLE_FOLLOW:
+                self.print_status("Following disabled - skipping to message", "info")
             
             # Click message button (on the profile, not sidebar)
             self.print_status("Looking for Message button on profile...", "info")
@@ -276,10 +282,21 @@ class InstagramDMAutomation:
             
         except Exception as e:
             error_msg = str(e)
+            error_type = self.csv_processor.categorize_error(error_msg)
             self.logger.error(f"Error processing profile {profile_url}: {error_msg}")
+            
+            # Update database if using flow system
+            if self.use_flow and profile_data:
+                profile_id = profile_data.get('id')
+                if profile_id:
+                    self.db.update_profile_failure(profile_id, error_type, error_msg)
+                    retry_count = profile_data.get('retry_count', 0) + 1
+                    self.print_status(f"Profile failed (attempt {retry_count}/3): {error_type}", "warning")
+            
+            # Also update CSV processor for legacy compatibility
             self.csv_processor.mark_profile_processed(
                 profile_url, "failed", error_msg,
-                error_type=self.csv_processor.categorize_error(error_msg)
+                error_type=error_type
             )
             return False
     
@@ -313,13 +330,22 @@ class InstagramDMAutomation:
                     self.print_status(f"No profiles found at step {self.step_filter}", "warning")
                     return
                 
+                # Count failed profiles for retry
+                failed_count = sum(1 for p in profiles_data if p['status'] == 'failed')
+                new_count = len(profiles_data) - failed_count
+                
+                if failed_count > 0:
+                    self.print_status(f"Found {new_count} new profiles + {failed_count} failed profiles for retry", "info")
+                else:
+                    self.print_status(f"Found {len(profiles_data)} new profiles", "info")
+                
                 # Convert to format expected by automation
                 profiles = []
                 for profile_data in profiles_data:
                     profile_url = f"https://www.instagram.com/{profile_data['username']}/"
                     profiles.append((profile_url, profile_data))
                 
-                self.print_status(f"Found {len(profiles)} profiles at step {self.step_filter}", "info")
+                self.print_status(f"Processing {len(profiles)} profiles at step {self.step_filter}", "info")
             else:
                 # Use CSV file (legacy mode)
                 if not self.csv_processor.load_csv():
@@ -366,7 +392,12 @@ class InstagramDMAutomation:
                     break
                 
                 # Process profile
-                self.print_status(f"Processing profile {i+1}/{len(profiles)}", "info")
+                retry_info = ""
+                if profile_data and profile_data.get('status') == 'failed':
+                    retry_count = profile_data.get('retry_count', 0)
+                    retry_info = f" (retry {retry_count + 1}/4)"
+                
+                self.print_status(f"Processing profile {i+1}/{len(profiles)}{retry_info}", "info")
                 
                 success = False
                 for retry in range(Config.MAX_RETRIES):

@@ -28,6 +28,9 @@ session_data/
 cookies/
 *.pkl
 
+# Settings (contains credentials)
+app_settings.json
+
 # Database
 automation_history.db
 automation_history.db.backup_*
@@ -49,7 +52,6 @@ logs/
 *.jpg
 
 # IDE
-.vscode/
 .idea/
 *.swp
 *.swo
@@ -63,3 +65,5 @@ Thumbs.db
 test_*.py
 debug_*.py
 
+config.bat
+node_modules

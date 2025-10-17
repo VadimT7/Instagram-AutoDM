@@ -48,6 +48,8 @@ class AutomationDatabase:
                     last_contacted DATETIME,
                     next_step_eligible DATETIME,
                     total_messages_sent INTEGER DEFAULT 0,
+                    retry_count INTEGER DEFAULT 0,
+                    last_retry DATETIME,
                     imported_from TEXT,
                     tags TEXT
                 )
@@ -133,6 +135,10 @@ class AutomationDatabase:
                 cursor.execute("ALTER TABLE profiles ADD COLUMN imported_from TEXT")
             if 'tags' not in existing_columns:
                 cursor.execute("ALTER TABLE profiles ADD COLUMN tags TEXT")
+            if 'retry_count' not in existing_columns:
+                cursor.execute("ALTER TABLE profiles ADD COLUMN retry_count INTEGER DEFAULT 0")
+            if 'last_retry' not in existing_columns:
+                cursor.execute("ALTER TABLE profiles ADD COLUMN last_retry DATETIME")
             
             # Create indexes for performance (after ensuring columns exist)
             cursor.execute("""
@@ -500,23 +506,55 @@ class AutomationDatabase:
                 """, (imported_from, tags, profile_url))
                 return existing['id']
     
-    def get_profiles_by_step(self, step_number, limit=None):
-        """Get profiles at a specific step in the flow"""
+    def get_profiles_by_step(self, step_number, limit=None, include_failed=True, max_retries=None):
+        """Get profiles at a specific step in the flow, including failed accounts for retry"""
+        from config import Config
+        
+        if max_retries is None:
+            max_retries = Config.MAX_DATABASE_RETRIES
+            
+        cooldown_minutes = Config.RETRY_COOLDOWN_MINUTES
+        
         with self.get_connection() as conn:
             cursor = conn.cursor()
             
-            query = """
-                SELECT * FROM profiles 
-                WHERE current_step = ? 
-                AND (next_step_eligible IS NULL OR next_step_eligible <= datetime('now'))
-                ORDER BY last_contacted ASC
-            """
+            if include_failed:
+                # Include both pending/active profiles and failed profiles eligible for retry
+                query = """
+                    SELECT * FROM profiles 
+                    WHERE current_step = ? 
+                    AND (
+                        (status IN ('pending', 'active', 'success') 
+                         AND (next_step_eligible IS NULL OR next_step_eligible <= datetime('now')))
+                        OR 
+                        (status = 'failed' 
+                         AND retry_count < ? 
+                         AND (last_retry IS NULL OR last_retry <= datetime('now', '-{} minutes')))
+                    )
+                    ORDER BY 
+                        CASE 
+                            WHEN status = 'failed' THEN 1  -- Prioritize failed accounts for retry
+                            ELSE 2 
+                        END,
+                        last_contacted ASC
+                """.format(cooldown_minutes)
+                cursor.execute(query, (step_number, max_retries))
+            else:
+                # Original logic - only pending/active profiles
+                query = """
+                    SELECT * FROM profiles 
+                    WHERE current_step = ? 
+                    AND (next_step_eligible IS NULL OR next_step_eligible <= datetime('now'))
+                    ORDER BY last_contacted ASC
+                """
+                cursor.execute(query, (step_number,))
+            
+            results = [dict(row) for row in cursor.fetchall()]
             
             if limit:
-                query += f" LIMIT {limit}"
+                results = results[:limit]
             
-            cursor.execute(query, (step_number,))
-            return [dict(row) for row in cursor.fetchall()]
+            return results
     
     def update_profile_step(self, profile_id, new_step, message_sent, wait_days=3):
         """Update profile's current step after sending a message"""
@@ -533,7 +571,8 @@ class AutomationDatabase:
                     last_contacted = ?, 
                     next_step_eligible = ?,
                     total_messages_sent = total_messages_sent + 1,
-                    status = 'active'
+                    status = 'active',
+                    retry_count = 0  -- Reset retry count on success
                 WHERE id = ?
             """, (new_step, datetime.now(), next_eligible, profile_id))
             
@@ -543,6 +582,23 @@ class AutomationDatabase:
                 (profile_id, step_number, message_sent, sent_at)
                 VALUES (?, ?, ?, ?)
             """, (profile_id, new_step, message_sent, datetime.now()))
+    
+    def update_profile_failure(self, profile_id, error_type, error_details):
+        """Update profile with failure information and increment retry count"""
+        from datetime import datetime
+        
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                UPDATE profiles 
+                SET status = 'failed',
+                    error_type = ?,
+                    error_details = ?,
+                    last_retry = datetime('now'),
+                    retry_count = retry_count + 1
+                WHERE id = ?
+            """, (error_type, error_details, profile_id))
     
     # Template Management
     
@@ -652,16 +708,39 @@ class AutomationDatabase:
                 'total_profiles': sum(step_counts.values())
             }
     
-    def get_eligible_profiles_count(self, step_number):
-        """Get count of profiles eligible for a specific step"""
+    def get_eligible_profiles_count(self, step_number, include_failed=True, max_retries=None):
+        """Get count of profiles eligible for a specific step, including failed accounts for retry"""
+        from config import Config
+        
+        if max_retries is None:
+            max_retries = Config.MAX_DATABASE_RETRIES
+            
+        cooldown_minutes = Config.RETRY_COOLDOWN_MINUTES
+        
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT COUNT(*) as count 
-                FROM profiles 
-                WHERE current_step = ? 
-                AND (next_step_eligible IS NULL OR next_step_eligible <= datetime('now'))
-            """, (step_number,))
+            
+            if include_failed:
+                cursor.execute("""
+                    SELECT COUNT(*) as count 
+                    FROM profiles 
+                    WHERE current_step = ? 
+                    AND (
+                        (status IN ('pending', 'active', 'success') 
+                         AND (next_step_eligible IS NULL OR next_step_eligible <= datetime('now')))
+                        OR 
+                        (status = 'failed' 
+                         AND retry_count < ? 
+                         AND (last_retry IS NULL OR last_retry <= datetime('now', '-{} minutes')))
+                    )
+                """.format(cooldown_minutes), (step_number, max_retries))
+            else:
+                cursor.execute("""
+                    SELECT COUNT(*) as count 
+                    FROM profiles 
+                    WHERE current_step = ? 
+                    AND (next_step_eligible IS NULL OR next_step_eligible <= datetime('now'))
+                """, (step_number,))
             
             return cursor.fetchone()['count']
     

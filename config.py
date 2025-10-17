@@ -2,13 +2,17 @@
 Configuration settings for Instagram automation
 """
 import os
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Try to load .env if it exists (optional - for backward compatibility)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except:
+    pass  # .env is optional, credentials can be set in GUI
 
 class Config:
-    # Instagram credentials (use environment variables for security)
+    # Instagram credentials (can be set via GUI or environment variables)
+    # Default to empty - will be set by GUI
     INSTAGRAM_USERNAME = os.getenv("INSTAGRAM_USERNAME", "")
     INSTAGRAM_PASSWORD = os.getenv("INSTAGRAM_PASSWORD", "")
     
@@ -24,8 +28,8 @@ So, I created a live website w/ your cars for you. I can send you the link and, 
 Reply "yes" to this message if you want to see your new luxurious website, tailored just to your rental company."""
     
     # Timing settings (in seconds) - optimized for speed
-    MIN_DELAY_BETWEEN_MESSAGES = 15  # Minimum delay between messages (faster)
-    MAX_DELAY_BETWEEN_MESSAGES = 45  # Maximum delay between messages (faster)
+    MIN_DELAY_BETWEEN_MESSAGES = 15  # Minimum delay between messages
+    MAX_DELAY_BETWEEN_MESSAGES = 45  # Maximum delay between messages
     
     # Session settings - increased throughput
     MESSAGES_PER_SESSION = 20  # Max messages to send per session (doubled)
@@ -36,15 +40,21 @@ Reply "yes" to this message if you want to see your new luxurious website, tailo
     DAILY_MESSAGE_LIMIT = 200  # Increased daily limit
     
     # Browser settings
-    HEADLESS_MODE = False  # Set to True to run browser in background (default for server deployment)
+    HEADLESS_MODE = True  # Set to True to run browser in background (default for server deployment)
     
     # Retry settings
-    MAX_RETRIES = 2  # Total attempts = 2 (1 initial + 1 retry)
+    MAX_RETRIES = 4  # Total attempts = 3 (1 initial + 3 retries)
     RETRY_DELAY = 30  # Delay before retrying failed profile (seconds)
+    MAX_DATABASE_RETRIES = 3  # Maximum retry attempts for failed accounts in database
+    RETRY_COOLDOWN_MINUTES = 30  # Minutes to wait before retrying a failed account
     
     # Anti-detection settings
     ENABLE_RANDOM_ACTIONS = True  # Enable random human-like actions
     RANDOM_ACTION_PROBABILITY = 0.3  # Probability of random actions
+    
+    # Follow settings
+    ENABLE_FOLLOW = False  # Enable/disable automatic following (set to False to avoid rate limits)
+    FOLLOW_ONLY_ON_FIRST_CONTACT = True  # Only follow on step 0/1, not on follow-ups
     
     # File paths
     CSV_FILE = "InstagramProfiles.csv"

@@ -242,9 +242,46 @@ class InstagramAutomation:
             self.logger.error(f"Error navigating to profile: {e}")
             return False
     
+    def check_rate_limit_popup(self):
+        """Check for and handle Instagram rate limit popup"""
+        try:
+            # Look for "Try again later" popup
+            popup_texts = [
+                "Try again later",
+                "Try Again Later",
+                "We limit how often you can do certain things",
+                "too many requests"
+            ]
+            
+            for text in popup_texts:
+                elements = self.driver.find_elements(By.XPATH, f"//*[contains(text(), '{text}')]")
+                if elements:
+                    self.logger.warning("⚠️ Instagram rate limit detected!")
+                    
+                    # Try to click "OK" button to dismiss
+                    try:
+                        ok_button = self.driver.find_element(By.XPATH, "//button[contains(text(), 'OK') or contains(text(), 'Ok')]")
+                        ok_button.click()
+                        self.logger.info("Dismissed rate limit popup")
+                        time.sleep(2)
+                    except:
+                        pass
+                    
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            return False
+    
     def follow_profile(self):
         """Follow the profile if not already following - bulletproof method"""
         try:
+            # Check if following is enabled in config
+            if not self.config.ENABLE_FOLLOW:
+                self.logger.info("Following disabled in config - skipping")
+                return False
+            
             # Wait for page to load
             time.sleep(2)
             self.logger.info("Looking for Follow button...")
@@ -331,11 +368,22 @@ class InstagramAutomation:
                 """, follow_button)
                 self.logger.info("✓ Clicked Follow button with JavaScript")
             
+            # Wait and check for rate limit popup
             self.human.random_delay(2, 3)
+            
+            # Check if Instagram blocked the follow action
+            if self.check_rate_limit_popup():
+                self.logger.warning("⚠️ Instagram follow rate limit reached - disabling follows for this session")
+                # Disable following for the rest of the session
+                self.config.ENABLE_FOLLOW = False
+                return False
+            
             return True
                 
         except Exception as e:
             self.logger.warning(f"Error following profile: {e}")
+            # Check for rate limit popup even on error
+            self.check_rate_limit_popup()
             return False
     
     def click_message_button(self):
@@ -539,10 +587,19 @@ class InstagramAutomation:
                 message_input.send_keys(Keys.RETURN)
             
             self.logger.info(f"Message sent: {message_text[:50]}...")
+            
+            # Check for rate limit popup after sending
+            time.sleep(2)
+            if self.check_rate_limit_popup():
+                self.logger.warning("⚠️ Instagram message rate limit detected after send")
+                return True  # Message was sent, but we're now rate limited
+            
             return True
             
         except Exception as e:
             self.logger.error(f"Error sending message: {e}")
+            # Check for rate limit even on error
+            self.check_rate_limit_popup()
             return False
     
     def check_for_blocks(self):
