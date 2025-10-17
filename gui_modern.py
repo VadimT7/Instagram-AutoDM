@@ -74,6 +74,10 @@ class ModernInstagramAutomation:
         # Database
         self.db = AutomationDatabase()
         
+        # Settings Manager
+        from settings_manager import SettingsManager
+        self.settings_manager = SettingsManager()
+        
         # Statistics
         self.total_sent = 0
         self.total_failed = 0
@@ -827,7 +831,7 @@ class ModernInstagramAutomation:
         
         self.accounts_tree = ttk.Treeview(
             tree_frame,
-            columns=('username', 'step', 'status', 'last_contacted', 'messages_sent', 'actions'),
+            columns=('username', 'step', 'status', 'last_contacted', 'messages_sent', 'retries', 'actions'),
             show='tree headings',
             yscrollcommand=vsb.set,
             xscrollcommand=hsb.set,
@@ -839,20 +843,22 @@ class ModernInstagramAutomation:
         
         # Configure columns
         self.accounts_tree.column('#0', width=0, stretch=tk.NO)
-        self.accounts_tree.column('username', width=200, anchor='w')
-        self.accounts_tree.column('step', width=80, anchor='center')
+        self.accounts_tree.column('username', width=180, anchor='w')
+        self.accounts_tree.column('step', width=70, anchor='center')
         self.accounts_tree.column('status', width=100, anchor='center')
-        self.accounts_tree.column('last_contacted', width=150, anchor='w')
-        self.accounts_tree.column('messages_sent', width=120, anchor='center')
-        self.accounts_tree.column('actions', width=200, anchor='center')
+        self.accounts_tree.column('last_contacted', width=130, anchor='w')
+        self.accounts_tree.column('messages_sent', width=100, anchor='center')
+        self.accounts_tree.column('retries', width=80, anchor='center')
+        self.accounts_tree.column('actions', width=180, anchor='center')
         
         # Configure headings
         self.accounts_tree.heading('username', text='Username')
-        self.accounts_tree.heading('step', text='Current Step')
+        self.accounts_tree.heading('step', text='Step')
         self.accounts_tree.heading('status', text='Status')
         self.accounts_tree.heading('last_contacted', text='Last Contacted')
-        self.accounts_tree.heading('messages_sent', text='Messages Sent')
-        self.accounts_tree.heading('actions', text='Quick Actions')
+        self.accounts_tree.heading('messages_sent', text='Messages')
+        self.accounts_tree.heading('retries', text='Retries')
+        self.accounts_tree.heading('actions', text='Actions')
         
         # Bind double-click to edit
         self.accounts_tree.bind('<Double-1>', self.edit_account)
@@ -929,11 +935,13 @@ class ModernInstagramAutomation:
         
         # Username
         self.create_input_field(account_card, "Username", "username_entry")
-        self.username_entry.insert(0, Config.INSTAGRAM_USERNAME or "")
+        saved_username = self.settings_manager.get("instagram_username", Config.INSTAGRAM_USERNAME or "")
+        self.username_entry.insert(0, saved_username)
         
         # Password
         self.create_input_field(account_card, "Password", "password_entry", show="*")
-        self.password_entry.insert(0, Config.INSTAGRAM_PASSWORD or "")
+        saved_password = self.settings_manager.get("instagram_password", Config.INSTAGRAM_PASSWORD or "")
+        self.password_entry.insert(0, saved_password)
         
         # Message Settings Card
         message_card = self.create_card(settings_container, "Message Configuration")
@@ -960,7 +968,8 @@ class ModernInstagramAutomation:
             bd=0
         )
         self.message_text.pack(fill=tk.X, padx=20, pady=(0, 20))
-        self.message_text.insert('1.0', Config.DEFAULT_MESSAGE)
+        saved_message = self.settings_manager.get("default_message", Config.DEFAULT_MESSAGE)
+        self.message_text.insert('1.0', saved_message)
         
         # Browser Settings Card
         browser_card = self.create_card(settings_container, "Browser Options")
@@ -970,7 +979,8 @@ class ModernInstagramAutomation:
         headless_frame = tk.Frame(browser_card, bg=COLORS['card_bg'])
         headless_frame.pack(fill=tk.X, padx=20, pady=(10, 20))
         
-        self.headless_var = tk.BooleanVar(value=Config.HEADLESS_MODE)
+        saved_headless = self.settings_manager.get("headless_mode", Config.HEADLESS_MODE)
+        self.headless_var = tk.BooleanVar(value=saved_headless)
         
         headless_check = tk.Checkbutton(
             headless_frame,
@@ -995,6 +1005,37 @@ class ModernInstagramAutomation:
             justify='left'
         )
         headless_desc.pack(anchor='w', pady=(5, 0))
+        
+        # Follow checkbox
+        follow_frame = tk.Frame(browser_card, bg=COLORS['card_bg'])
+        follow_frame.pack(fill=tk.X, padx=20, pady=(10, 20))
+        
+        saved_follow = self.settings_manager.get("enable_follow", Config.ENABLE_FOLLOW)
+        self.follow_var = tk.BooleanVar(value=saved_follow)
+        
+        follow_check = tk.Checkbutton(
+            follow_frame,
+            text="Auto-Follow Profiles (Recommended: OFF to avoid rate limits)",
+            variable=self.follow_var,
+            font=('Segoe UI', 10),
+            bg=COLORS['card_bg'],
+            fg=COLORS['text_primary'],
+            selectcolor=COLORS['input_bg'],
+            activebackground=COLORS['card_bg'],
+            activeforeground=COLORS['accent']
+        )
+        follow_check.pack(anchor='w')
+        
+        follow_desc = tk.Label(
+            follow_frame,
+            text="Instagram limits follows to ~200/day. Disable this to avoid 'Try again later' blocks.\nYou can still message without following!",
+            font=('Segoe UI', 9),
+            bg=COLORS['card_bg'],
+            fg=COLORS['text_secondary'],
+            wraplength=600,
+            justify='left'
+        )
+        follow_desc.pack(anchor='w', pady=(5, 0))
         
         # Performance Settings Card
         perf_card = self.create_card(settings_container, "Performance")
@@ -1434,11 +1475,13 @@ Professional automation solution
             # We have profiles in database - use flow system
             selected_step = self.step_var.get() if hasattr(self, 'step_var') else 0
             self.log_message(f"Selected step for automation: {selected_step}", "info")
-            eligible_count = self.db.get_eligible_profiles_count(selected_step)
+            eligible_count = self.db.get_eligible_profiles_count(selected_step, include_failed=True)
+            new_count = self.db.get_eligible_profiles_count(selected_step, include_failed=False)
+            retry_count = eligible_count - new_count
             
             # Debug: Show what profiles exist at each step
             self.log_message(f"Database stats: {stats}", "info")
-            self.log_message(f"Eligible profiles at step {selected_step}: {eligible_count}", "info")
+            self.log_message(f"Eligible profiles at step {selected_step}: {eligible_count} ({new_count} new + {retry_count} retries)", "info")
             
             if eligible_count == 0:
                 result = messagebox.askyesno(
@@ -1467,11 +1510,15 @@ Professional automation solution
             step_desc = step_names.get(selected_step, f"Step {selected_step}")
             
             # Confirm
+            profile_info = f"{eligible_count}"
+            if retry_count > 0:
+                profile_info = f"{eligible_count} ({new_count} new + {retry_count} retries)"
+            
             confirm = messagebox.askyesno(
                 "Start Automation",
                 f"Send messages using Flow System?\n\n"
                 f"Action: {step_desc}\n"
-                f"Profiles to contact: {eligible_count}\n\n"
+                f"Profiles to contact: {profile_info}\n\n"
                 f"Template: {template_preview}\n\n"
                 f"Continue?"
             )
@@ -1621,24 +1668,52 @@ Professional automation solution
         self.root.after(100, self.process_queues)
         
     def log_message(self, message, level="info"):
-        """Add message to log displays"""
+        """Add message to log displays with color coding"""
         timestamp = datetime.now().strftime("%H:%M:%S")
         
-        # Determine color based on level
+        # Determine color based on level and message content
         color_map = {
             'info': COLORS['text_primary'],
             'success': COLORS['success'],
-            'warning': COLORS['warning'],
-            'error': COLORS['danger']
+            'warning': '#4A9EFF',  # Blue color for warnings/failures
+            'error': '#4A9EFF'     # Blue color for errors (per user request)
         }
+        
+        # Auto-detect level from message content if info
+        if level == "info":
+            message_lower = message.lower()
+            if any(keyword in message_lower for keyword in ['success', 'sent successfully', 'completed', '✓']):
+                level = 'success'
+            elif any(keyword in message_lower for keyword in ['failed', 'error', 'retry', 'attempt', 'warning', 'not found', 'moving to next']):
+                level = 'warning'
+        
         color = color_map.get(level, COLORS['text_primary'])
         
-        # Add to full log
-        self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
+        # Create formatted message
+        formatted_msg = f"[{timestamp}] {message}\n"
+        
+        # Add to full log with color
+        # Get position before insert
+        start_line = self.log_text.index("end-1c linestart")
+        self.log_text.insert(tk.END, formatted_msg)
+        # Get position after insert (before the final newline)
+        end_line = self.log_text.index("end-1c lineend")
+        
+        # Apply color tag
+        tag_name = f"log_{level}_{id(formatted_msg)}"  # Unique tag per message
+        self.log_text.tag_config(tag_name, foreground=color)
+        self.log_text.tag_add(tag_name, start_line, end_line)
         self.log_text.see(tk.END)
         
-        # Add to preview
-        self.log_preview.insert(tk.END, f"[{timestamp}] {message}\n")
+        # Add to preview with color
+        preview_start_line = self.log_preview.index("end-1c linestart")
+        self.log_preview.insert(tk.END, formatted_msg)
+        preview_end_line = self.log_preview.index("end-1c lineend")
+        
+        # Apply color tag to preview
+        preview_tag_name = f"preview_{level}_{id(formatted_msg)}"
+        self.log_preview.tag_config(preview_tag_name, foreground=color)
+        self.log_preview.tag_add(preview_tag_name, preview_start_line, preview_end_line)
         self.log_preview.see(tk.END)
         
         # Limit log size
@@ -1731,6 +1806,10 @@ Professional automation solution
                 # Messages sent
                 messages_sent = result.get('total_messages_sent', 0)
                 
+                # Retry count
+                retry_count = result.get('retry_count', 0)
+                retry_text = f"{retry_count}/3" if status == 'failed' else "0/3"
+                
                 # Actions (just text, actual buttons via context menu)
                 actions = "Double-click or Right-click"
                 
@@ -1740,6 +1819,7 @@ Professional automation solution
                     f"{status_emoji} {status_text}",
                     last_contacted_str,
                     messages_sent,
+                    retry_text,
                     actions
                 ), tags=tags)
             
@@ -1816,21 +1896,31 @@ Most Active Day: Monday
             
     def save_settings(self):
         """Save current settings"""
-        # Update .env file
-        env_content = f"""INSTAGRAM_USERNAME={self.username_entry.get()}
-INSTAGRAM_PASSWORD={self.password_entry.get()}"""
+        # Save to settings file
+        settings_to_save = {
+            "instagram_username": self.username_entry.get(),
+            "instagram_password": self.password_entry.get(),
+            "default_message": self.message_text.get('1.0', tk.END).strip(),
+            "headless_mode": self.headless_var.get(),
+            "enable_follow": self.follow_var.get(),
+            "delay_between_messages": self.delay_slider.get(),
+            "messages_per_session": self.session_slider.get()
+        }
         
-        with open('.env', 'w') as f:
-            f.write(env_content)
+        if self.settings_manager.update(settings_to_save):
+            # Also update config for current session
+            Config.INSTAGRAM_USERNAME = self.username_entry.get()
+            Config.INSTAGRAM_PASSWORD = self.password_entry.get()
+            Config.DEFAULT_MESSAGE = self.message_text.get('1.0', tk.END).strip()
+            Config.HEADLESS_MODE = self.headless_var.get()
+            Config.ENABLE_FOLLOW = self.follow_var.get()
+            Config.MIN_DELAY_BETWEEN_MESSAGES = int(self.delay_slider.get() * 0.8)
+            Config.MAX_DELAY_BETWEEN_MESSAGES = int(self.delay_slider.get() * 1.2)
+            Config.MESSAGES_PER_SESSION = int(self.session_slider.get())
             
-        # Update config
-        Config.DEFAULT_MESSAGE = self.message_text.get('1.0', tk.END).strip()
-        Config.HEADLESS_MODE = self.headless_var.get()
-        Config.MIN_DELAY_BETWEEN_MESSAGES = int(self.delay_slider.get() * 0.8)
-        Config.MAX_DELAY_BETWEEN_MESSAGES = int(self.delay_slider.get() * 1.2)
-        Config.MESSAGES_PER_SESSION = int(self.session_slider.get())
-        
-        messagebox.showinfo("Success", f"Settings saved successfully!\n\nHeadless Mode: {'Enabled' if self.headless_var.get() else 'Disabled'}")
+            messagebox.showinfo("Success", f"Settings saved successfully!\n\nHeadless Mode: {'Enabled' if self.headless_var.get() else 'Disabled'}\nAuto-Follow: {'Enabled' if self.follow_var.get() else 'Disabled'}\n\nSettings are saved and will persist between app launches.")
+        else:
+            messagebox.showerror("Error", "Failed to save settings")
         
     def browse_csv(self):
         """Browse for CSV file"""
@@ -2009,12 +2099,17 @@ Each report includes:
             # Get flow statistics
             stats = self.db.get_flow_statistics()
             
-            # Update eligible profiles count
+            # Update eligible profiles count (including failed for retry)
             step = self.step_var.get() if hasattr(self, 'step_var') else 0
-            eligible_count = self.db.get_eligible_profiles_count(step)
+            eligible_count = self.db.get_eligible_profiles_count(step, include_failed=True)
+            new_count = self.db.get_eligible_profiles_count(step, include_failed=False)
+            retry_count = eligible_count - new_count
             
             if hasattr(self, 'eligible_label'):
-                self.eligible_label.config(text=f"Eligible profiles: {eligible_count}")
+                if retry_count > 0:
+                    self.eligible_label.config(text=f"Eligible: {eligible_count} ({new_count} new + {retry_count} retries)")
+                else:
+                    self.eligible_label.config(text=f"Eligible profiles: {eligible_count}")
             
             # Format statistics text
             stats_text = []

@@ -1,0 +1,11 @@
+# Instagram Credentials Template
+# Copy this to a file named ".env" in the same folder as the executable
+
+INSTAGRAM_USERNAME=your_instagram_username
+INSTAGRAM_PASSWORD=your_instagram_password
+
+# Configuration (Optional - these have defaults)
+# HEADLESS_MODE=True
+# DAILY_MESSAGE_LIMIT=200
+# MAX_RETRIES=4
+
